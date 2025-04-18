@@ -1,6 +1,8 @@
 package config
 
 import (
+	"log"
+
 	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
 )
@@ -33,15 +35,13 @@ type PrometheusConfig struct {
 	Address string `envconfig:"PROMETHEUS_ADDRESS" default:":9000"`
 }
 
-func Load() (*Config, error) {
+func NewConfig() *Config {
 	// Загружаем переменные из .env файла (если существует)
 	_ = godotenv.Load()
 
 	var cfg Config
-	err := envconfig.Process("", &cfg)
-	if err != nil {
-		return nil, err
+	if err := envconfig.Process("", &cfg); err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
-
-	return &cfg, nil
+	return &cfg
 }
