@@ -1,48 +1,62 @@
 package db
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
+	"time"
 
-	_ "github.com/lib/pq" // Импортируем драйвер PostgreSQL
-	"go.uber.org/fx"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
+
+	"pvz-service/internal/config"
+	"pvz-service/pkg/logger"
 )
 
-// Config содержит параметры для подключения к базе данных
-type Config struct {
-	Host     string
-	Port     int
-	User     string
-	Password string
-	DBName   string
+func New(cfg config.DBConfig, log logger.Logger) *sqlx.DB {
+	const f = "storage.NewStorage"
+	var db *sqlx.DB
+
+	// Подключение к PostgreSQL с повторами
+	var err error
+	db, err = connectWithRetries(cfg, log)
+	if err != nil {
+		log.Error("Failed to connect to PostgreSQL: ", slog.String("func", f), slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	return db
 }
 
-// NewPostgresDB создает новое подключение к базе данных PostgreSQL
-func NewPostgresDB(lc fx.Lifecycle, cfg *Config) (*sql.DB, error) {
-	// Формируем строку подключения
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName)
+const (
+	maxRetries = 5
+	retryDelay = 5 * time.Second
+)
 
-	// Открываем подключение к базе данных
-	db, err := sql.Open("postgres", connStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+func connectWithRetries(cfg config.DBConfig, log logger.Logger) (*sqlx.DB, error) {
+	var db *sqlx.DB
+	var err error
+
+	dsn := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=disable",
+		cfg.Host, cfg.Port, cfg.User, cfg.Name, cfg.Password)
+	log.Debug("preparing connect to PostgreSQL", slog.String("dsn", dsn))
+	for i := 0; i < maxRetries; i++ {
+		db, err = sqlx.Open("postgres", dsn)
+		if err == nil {
+			if err = db.Ping(); err == nil {
+				log.Info("Successfully connected to PostgreSQL",
+					slog.String("host", cfg.Host),
+					slog.String("db", cfg.Name))
+				return db, nil
+			}
+		}
+
+		log.Warn("Failed to connect to PostgreSQL, retrying...",
+			slog.Int("attempt", i+1),
+			slog.String("error", err.Error()))
+
+		time.Sleep(retryDelay)
 	}
 
-	// Проверяем подключение к базе данных
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	// Добавляем обработчик для закрытия подключения при остановке приложения
-	lc.Append(fx.Hook{
-		OnStop: func(ctx context.Context) error {
-			return db.Close()
-		},
-	})
-
-	log.Println("Connected to PostgreSQL database")
-	return db, nil
+	return nil, fmt.Errorf("failed to connect after %d attempts: %v", maxRetries, err)
 }

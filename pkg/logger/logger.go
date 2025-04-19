@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"os"
 )
@@ -27,8 +28,8 @@ const (
 	LevelProd  = "prod"
 )
 
-// New создает новый экземпляр логгера
-func New(level string) Logger {
+// MustInit создает новый экземпляр логгера или роняет сервер
+func MustInit(level string) Logger {
 	var handler slog.Handler
 
 	switch level {
@@ -45,7 +46,7 @@ func New(level string) Logger {
 			Level: slog.LevelInfo,
 		})
 	default:
-		panic("unknown log level: " + level)
+		log.Printf("unknown log level: %v", level)
 	}
 
 	return &slogLogger{
